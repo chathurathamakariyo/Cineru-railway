@@ -1,37 +1,39 @@
-from fastapi import FastAPI, Query
-from scraper import search_cineru, scrape_movie_details, extract_download_links
+from fastapi import FastAPI
+from scraper import search_cineru, scrape_movie, get_download_links
 
 app = FastAPI()
 
 @app.get("/")
-def home(
-    q: str = None,
-    info: str = None,
-    dl: str = None
-):
+def root(q: str = None, info: str = None, dl: str = None):
 
-    # 🔍 Search
+    # 🔍 SEARCH
     if q:
         return {
-            "status": "success",
+            "status": True,
+            "query": q,
             "results": search_cineru(q)
         }
 
-    # 🎬 Movie info
+    # 🎬 INFO
     if info:
         return {
-            "status": "success",
-            "data": scrape_movie_details(info)
+            "status": True,
+            "data": scrape_movie(info)
         }
 
-    # ⬇️ Download links
+    # ⬇️ DOWNLOAD
     if dl:
         return {
-            "status": "success",
-            "links": extract_download_links(dl)
+            "status": True,
+            "links": get_download_links(dl)
         }
 
     return {
-        "status": "running",
-        "message": "Use ?q=, ?info=, ?dl="
+        "status": True,
+        "message": "API running",
+        "usage": {
+            "search": "/?q=2026",
+            "info": "/?info=url",
+            "download": "/?dl=url"
+        }
     }
