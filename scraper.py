@@ -2,106 +2,145 @@ import cloudscraper
 from bs4 import BeautifulSoup
 import re
 
-scraper = cloudscraper.create_scraper()
+scraper = cloudscraper.create_scraper(
+    browser={
+        "browser": "chrome",
+        "platform": "windows",
+        "mobile": False
+    }
+)
 
-def process_title(raw_title):
-    title = re.sub(r'\(\d{4}\)', '', raw_title)
-    title = re.split(r'\|', title)[0]
-    title = title.replace("Sinhala Subtitles", "")
-    return title.strip()
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122 Safari/537.36",
+    "Referer": "https://cineru.lk/",
+    "Accept-Language": "en-US,en;q=0.9"
+}
+
+# 🎬 clean title
+def process_title(title):
+    title = re.sub(r'\(\d{4}\)', '', title)
+    title = title.split("|")[0]
+    return title.replace("Sinhala Subtitles", "").strip()
 
 
+# 🖼️ thumbnail
 def get_thumbnail(url):
-    res = scraper.get(url)
-    soup = BeautifulSoup(res.text, "html.parser")
-    og = soup.find("meta", property="og:image")
-    return og.get("content") if og else None
+    try:
+        res = scraper.get(url, headers=HEADERS, timeout=15)
+        soup = BeautifulSoup(res.text, "html.parser")
+        og = soup.find("meta", property="og:image")
+        return og["content"] if og else None
+    except:
+        return None
 
 
+# 🔍 search (PRO FIX)
 def search_cineru(query):
     results = []
 
     for page in range(1, 3):
-        url = f"https://cineru.lk/page/{page}/?s={query}" if page > 1 else f"https://cineru.lk/?s={query}"
+        url = f"https://cineru.lk/page/{page}/?s={query}"
 
-        res = scraper.get(url)
-        soup = BeautifulSoup(res.text, "html.parser")
+        try:
+            res = scraper.get(url, headers=HEADERS, timeout=20)
+            html = res.text
 
-        articles = soup.find_all("article")
-
-        for article in articles:
-            a = article.find("a")
-            if not a:
+            # ❗ DEBUG fallback (important)
+            if "Just a moment" in html or len(html) < 500:
                 continue
 
-            title = process_title(a.text.strip())
-            link = a.get("href")
-            thumb = get_thumbnail(link)
+            soup = BeautifulSoup(html, "html.parser")
 
-            results.append({
-                "title": title,
-                "url": link,
-                "thumbnail": thumb
-            })
+            # 🔥 multiple selectors fallback
+            items = soup.select("article, div.post, div.blog-item")
+
+            for item in items:
+                a = item.find("a")
+                if not a:
+                    continue
+
+                link = a.get("href")
+                title = a.get_text(strip=True)
+
+                if not link:
+                    continue
+
+                results.append({
+                    "title": process_title(title),
+                    "url": link,
+                    "thumbnail": get_thumbnail(link)
+                })
+
+        except Exception as e:
+            print("Search error:", e)
+            continue
 
     return results
 
 
-def scrape_movie_details(url):
-    res = scraper.get(url)
-    soup = BeautifulSoup(res.text, "html.parser")
+# 🎬 info scraper
+def scrape_movie(url):
+    try:
+        res = scraper.get(url, headers=HEADERS, timeout=20)
+        soup = BeautifulSoup(res.text, "html.parser")
 
-    h1 = soup.find("h1")
-    raw_title = h1.text.strip() if h1 else ""
+        h1 = soup.find("h1")
+        raw = h1.text.strip() if h1 else ""
 
-    title = re.sub(r'\(\d{4}\)', '', raw_title)
-    title = re.split(r'\|', title)[0].replace("Sinhala Subtitles", "").strip()
+        title = process_title(raw)
+        year = re.search(r'(\d{4})', raw)
+        year = year.group(1) if year else None
 
-    year = re.search(r'(\d{4})', raw_title)
-    year = year.group(1) if year else None
+        og = soup.find("meta", property="og:image")
+        thumb = og["content"] if og else None
 
-    og = soup.find("meta", property="og:image")
-    thumbnail = og["content"] if og else None
+        content = soup.select_one("div.entry-content, article")
 
-    content = soup.select_one("div.entry-content, article")
+        desc = None
+        info = {}
 
-    description = None
-    info = {}
+        if content:
+            for p in content.find_all(["p", "li"]):
+                text = p.get_text(" ", strip=True)
 
-    if content:
-        paragraphs = content.find_all(["p", "li"])
+                if not desc and len(text) > 80:
+                    desc = text
 
-        for p in paragraphs:
-            text = p.get_text(" ", strip=True)
+                if ":" in text:
+                    k, v = text.split(":", 1)
+                    info[k.strip()] = v.strip()
 
-            if not description and len(text) > 80:
-                description = text
+        return {
+            "title": title,
+            "year": year,
+            "thumbnail": thumb,
+            "description": desc,
+            "info": info
+        }
 
-            if ":" in text:
-                k, v = text.split(":", 1)
-                info[k.strip()] = v.strip()
-
-    return {
-        "title": title,
-        "year": year,
-        "thumbnail": thumbnail,
-        "description": description,
-        "info": info
-    }
+    except Exception as e:
+        return {"error": str(e)}
 
 
-def extract_download_links(post_id):
-    res = scraper.post(
-        "https://cineru.lk/wp-admin/admin-ajax.php",
-        data={"action": "cs_download_data", "post_id": post_id}
-    )
+# ⬇️ download extractor
+def get_download_links(post_id):
+    try:
+        res = scraper.post(
+            "https://cineru.lk/wp-admin/admin-ajax.php",
+            data={"action": "cs_download_data", "post_id": post_id},
+            headers=HEADERS,
+            timeout=20
+        )
 
-    if res.status_code != 200:
+        data = res.json()
+        html = data.get("data", "")
+
+        links = re.findall(
+            r'data-link="(https://dl\.cineru\.lk/dl\.php\?token=[^"]+)"',
+            html
+        )
+
+        return list(dict.fromkeys(links))
+
+    except:
         return []
-
-    result = res.json()
-    html = result.get("data", "")
-
-    links = re.findall(r'data-link="(https://dl\.cineru\.lk/dl\.php\?token=[^"]+)"', html)
-
-    return list(dict.fromkeys(links))
