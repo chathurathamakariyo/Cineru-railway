@@ -1767,6 +1767,7 @@ const COUNTDOWN_CHANNEL_ID = -1003772311516;
 const COUNTDOWN_TARGET     = new Date('2026-08-11T00:00:00+05:30');
 const CHANNEL_CD_FILE      = path.join(DATA_DIR, 'channel_cd.json');
 const COUNTDOWN_IMAGE_URL  = 'https://files.catbox.moe/a5zt8f.png';
+const COUNTDOWN_START_DATE = new Date('2025-08-11T00:00:00+05:30');
 
 let channelCountdownMsgId = null;
 
@@ -1792,42 +1793,41 @@ function buildCountdownText() {
   const mins  = Math.floor((diff % 3600000)  / 60000);
   const secs  = Math.floor((diff % 60000)    / 1000);
 
-  // ── Progress bar (fills 1 block per 30 seconds) ──
-  const TOTAL_DAYS   = 365;
-  const TOTAL_SECS   = TOTAL_DAYS * 24 * 3600;
-  const elapsed_secs = TOTAL_SECS - Math.ceil(diff / 1000);
-  const BAR_LEN      = 20;
-  const filledBlocks = Math.max(0, Math.min(BAR_LEN,
-    Math.floor(elapsed_secs / (TOTAL_SECS / BAR_LEN))));
-  const percent      = Math.round((elapsed_secs / TOTAL_SECS) * 100);
+  // ── Elapsed seconds since START_DATE ─────
+  const totalElapsed = Math.max(0, Math.floor((now - COUNTDOWN_START_DATE) / 1000));
+  const INTERVAL     = 30; // seconds per block
 
-  // Animate leading edge
+  // ── Progress bar (20 blocks, loops 0→20→0) ──
+  const BAR_LEN   = 20;
+  const barTick   = Math.floor(totalElapsed / INTERVAL);
+  const filledBar = barTick % (BAR_LEN + 1);
+
   const tick = Math.floor(Date.now() / 1000) % 2 === 0;
   let barStr = '';
   for (let i = 0; i < BAR_LEN; i++) {
-    if (i < filledBlocks - 1)        barStr += '▰';
-    else if (i === filledBlocks - 1) barStr += tick ? '▰' : '▱';
-    else                             barStr += '▱';
+    if (i < filledBar - 1)        barStr += '▰';
+    else if (i === filledBar - 1) barStr += tick ? '▰' : '▱';
+    else                          barStr += '▱';
   }
+  const percent = Math.round((filledBar / BAR_LEN) * 100);
 
-  // ── Grid (8×8 = 64 cells, fills 1 per 30 seconds) ──
-  const TOTAL_CELLS  = 64;
-  const elapsedCells = Math.max(0, Math.min(TOTAL_CELLS,
-    Math.floor(elapsed_secs / (TOTAL_SECS / TOTAL_CELLS))));
+  // ── Grid (8×8 = 64 cells, loops 0→64→0) ──
+  const TOTAL_CELLS = 64;
+  const gridTick    = Math.floor(totalElapsed / INTERVAL);
+  const filledCells = gridTick % (TOTAL_CELLS + 1);
 
-  // Wave animation on boundary
   const wave = Math.floor(Date.now() / 500) % 3;
   let grid = '';
   for (let i = 0; i < TOTAL_CELLS; i++) {
-    if (i < elapsedCells) {
-      if (i >= elapsedCells - 3) {
-        const dist = elapsedCells - 1 - i;
+    if (i < filledCells) {
+      if (i >= filledCells - 3) {
+        const dist = filledCells - 1 - i;
         grid += dist === wave % 3 ? '⏳' : '⌛';
       } else {
         grid += '⌛';
       }
     } else {
-      grid += i === elapsedCells && tick ? '🔆' : '✳️';
+      grid += i === filledCells && tick ? '🔆' : '✳️';
     }
     if ((i + 1) % 8 === 0) grid += '\n';
   }
@@ -1841,7 +1841,7 @@ function buildCountdownText() {
     `🎓 <b>A/L 2026 විභාග Countdown</b>\n` +
     `━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
     `⏰ තව  <b>${days}</b> දින  <b>${hours}</b> පැය  <b>${mins}</b> මිනි  <b>${secs}</b> තත්\n\n` +
-    `<b>${barStr}</b>  <i>${percent}% ගෙවී ගිය</i>\n\n` +
+    `<b>${barStr}</b>  <i>${percent}%</i>\n\n` +
     `${grid}\n` +
     `📅 <b>අද :</b> <code>${dateStr}</code>    ` +
     `🕐 <code>${timeStr}</code> <i>SLT</i>\n\n` +
@@ -1850,8 +1850,8 @@ function buildCountdownText() {
 }
 
 function buildCountdownKeyboard() {
-  const now  = new Date();
-  const diff = COUNTDOWN_TARGET - now;
+  const now   = new Date();
+  const diff  = COUNTDOWN_TARGET - now;
   const days  = Math.max(0, Math.floor(diff / 86400000));
   const hours = Math.floor((diff % 86400000) / 3600000);
   const mins  = Math.floor((diff % 3600000)  / 60000);
