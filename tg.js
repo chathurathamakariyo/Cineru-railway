@@ -1760,7 +1760,176 @@ bot.on('my_chat_member', async(update)=>{
     }
   }catch(e){console.error('[my_chat_member]',e.message);}
 });
+// ══════════════════════════════════════════════
+//  CHANNEL LIVE COUNTDOWN  (animated bar + grid)
+// ══════════════════════════════════════════════
+const COUNTDOWN_CHANNEL_ID = -1003772311516;
+const COUNTDOWN_TARGET     = new Date('2026-08-11T00:00:00+05:30');
+const CHANNEL_CD_FILE      = path.join(DATA_DIR, 'channel_cd.json');
+const COUNTDOWN_IMAGE_URL  = 'https://files.catbox.moe/a5zt8f.png';
 
+let channelCountdownMsgId = null;
+
+try {
+  const saved = JSON.parse(fs.readFileSync(CHANNEL_CD_FILE, 'utf8'));
+  if (saved && saved.msgId) {
+    channelCountdownMsgId = saved.msgId;
+    console.log('[channelCountdown] Restored msg_id:', channelCountdownMsgId);
+  }
+} catch (_) {}
+
+function saveChannelCdMsgId(msgId) {
+  try { fs.writeFileSync(CHANNEL_CD_FILE, JSON.stringify({ msgId }, null, 2)); } catch (_) {}
+}
+
+function buildCountdownText() {
+  const now  = new Date();
+  const diff = COUNTDOWN_TARGET - now;
+  if (diff <= 0) return null;
+
+  const days  = Math.floor(diff / 86400000);
+  const hours = Math.floor((diff % 86400000) / 3600000);
+  const mins  = Math.floor((diff % 3600000)  / 60000);
+  const secs  = Math.floor((diff % 60000)    / 1000);
+
+  // ── Progress bar (fills 1 block per 30 seconds) ──
+  const TOTAL_DAYS   = 365;
+  const TOTAL_SECS   = TOTAL_DAYS * 24 * 3600;
+  const elapsed_secs = TOTAL_SECS - Math.ceil(diff / 1000);
+  const BAR_LEN      = 20;
+  const filledBlocks = Math.max(0, Math.min(BAR_LEN,
+    Math.floor(elapsed_secs / (TOTAL_SECS / BAR_LEN))));
+  const percent      = Math.round((elapsed_secs / TOTAL_SECS) * 100);
+
+  // Animate leading edge
+  const tick = Math.floor(Date.now() / 1000) % 2 === 0;
+  let barStr = '';
+  for (let i = 0; i < BAR_LEN; i++) {
+    if (i < filledBlocks - 1)        barStr += '▰';
+    else if (i === filledBlocks - 1) barStr += tick ? '▰' : '▱';
+    else                             barStr += '▱';
+  }
+
+  // ── Grid (8×8 = 64 cells, fills 1 per 30 seconds) ──
+  const TOTAL_CELLS  = 64;
+  const elapsedCells = Math.max(0, Math.min(TOTAL_CELLS,
+    Math.floor(elapsed_secs / (TOTAL_SECS / TOTAL_CELLS))));
+
+  // Wave animation on boundary
+  const wave = Math.floor(Date.now() / 500) % 3;
+  let grid = '';
+  for (let i = 0; i < TOTAL_CELLS; i++) {
+    if (i < elapsedCells) {
+      if (i >= elapsedCells - 3) {
+        const dist = elapsedCells - 1 - i;
+        grid += dist === wave % 3 ? '⏳' : '⌛';
+      } else {
+        grid += '⌛';
+      }
+    } else {
+      grid += i === elapsedCells && tick ? '🔆' : '✳️';
+    }
+    if ((i + 1) % 8 === 0) grid += '\n';
+  }
+
+  // ── SL time ──────────────────────────────
+  const sl      = new Date(now.getTime() + 5.5 * 3600000);
+  const dateStr = sl.toISOString().slice(0, 10);
+  const timeStr = sl.toISOString().slice(11, 16);
+
+  return (
+    `🎓 <b>A/L 2026 විභාග Countdown</b>\n` +
+    `━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+    `⏰ තව  <b>${days}</b> දින  <b>${hours}</b> පැය  <b>${mins}</b> මිනි  <b>${secs}</b> තත්\n\n` +
+    `<b>${barStr}</b>  <i>${percent}% ගෙවී ගිය</i>\n\n` +
+    `${grid}\n` +
+    `📅 <b>අද :</b> <code>${dateStr}</code>    ` +
+    `🕐 <code>${timeStr}</code> <i>SLT</i>\n\n` +
+    `<i>✦ සෑම තත්පර 30 කට වරක් update වේ ✦</i>`
+  );
+}
+
+function buildCountdownKeyboard() {
+  const now  = new Date();
+  const diff = COUNTDOWN_TARGET - now;
+  const days  = Math.max(0, Math.floor(diff / 86400000));
+  const hours = Math.floor((diff % 86400000) / 3600000);
+  const mins  = Math.floor((diff % 3600000)  / 60000);
+
+  return {
+    inline_keyboard: [
+      [
+        { text: `⏳ ${days} දින | ${hours} පැය | ${mins} මිනි`, url: 'https://t.me/SL_pastpaper_bot?start=countdown' }
+      ],
+      [
+        { text: '📚 Past Papers', url: 'https://t.me/SL_pastpaper_bot' },
+        { text: '💬 Support',     url: 'https://t.me/SL_pastpaper_support' }
+      ]
+    ]
+  };
+}
+
+async function postChannelCountdown() {
+  const text = buildCountdownText();
+  if (!text) return;
+
+  const reply_markup = buildCountdownKeyboard();
+
+  try {
+    if (channelCountdownMsgId) {
+      try {
+        await bot.editMessageCaption(text, {
+          chat_id:    COUNTDOWN_CHANNEL_ID,
+          message_id: channelCountdownMsgId,
+          parse_mode: 'HTML',
+          reply_markup,
+        });
+      } catch (editErr) {
+        if (
+          editErr.message.includes('message to edit not found') ||
+          editErr.message.includes('MESSAGE_ID_INVALID') ||
+          editErr.message.includes('there is no caption')
+        ) {
+          channelCountdownMsgId = null;
+          saveChannelCdMsgId(null);
+          await postChannelCountdown();
+        } else {
+          throw editErr;
+        }
+      }
+    } else {
+      const sent = await bot.sendPhoto(
+        COUNTDOWN_CHANNEL_ID,
+        COUNTDOWN_IMAGE_URL,
+        {
+          caption:    text,
+          parse_mode: 'HTML',
+          reply_markup,
+        }
+      );
+      channelCountdownMsgId = sent.message_id;
+      saveChannelCdMsgId(channelCountdownMsgId);
+      try {
+        await bot.pinChatMessage(COUNTDOWN_CHANNEL_ID, channelCountdownMsgId,
+          { disable_notification: true });
+      } catch (_) {}
+      console.log('[channelCountdown] Posted & pinned, msg_id:', channelCountdownMsgId);
+    }
+  } catch (e) {
+    console.error('[channelCountdown]', e.message);
+    if (
+      e.message.includes('message to edit not found') ||
+      e.message.includes('MESSAGE_ID_INVALID')
+    ) {
+      channelCountdownMsgId = null;
+      saveChannelCdMsgId(null);
+    }
+  }
+}
+
+// Every 30 seconds update
+setInterval(postChannelCountdown, 30 * 1000);
+postChannelCountdown();
 // ══════════════════════════════════════════════
 //  STARTUP
 // ══════════════════════════════════════════════
